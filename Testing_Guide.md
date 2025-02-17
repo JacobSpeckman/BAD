@@ -21,7 +21,7 @@ For the most stable experience, **Option 1 (Windows Server VM) is recommended**.
 
 ---
 
-## **Step 2: Set Up a Windows Server VM (Option 1 - Recommended)**
+## **Step 2: Set Up a Windows Server VM (Option 1)**
 1. **Install a Virtualization Platform** (If you don’t have one):
    - **Windows**: Use **Hyper-V** (`Optional Features > Enable Hyper-V`).
    - **Mac/Linux**: Use **VMware Workstation**, **VirtualBox**, or **Proxmox**.
