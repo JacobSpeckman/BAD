@@ -118,7 +118,7 @@ function Get-ADServiceAccounts {
     $gMSAs = @()
     try {
         $gMSAs = Get-ADServiceAccount -Filter * -ErrorAction SilentlyContinue |
-            Select Name, SamAccountName, DNSHostName, ServicePrincipalNames
+            Select-Object Name, SamAccountName, DNSHostName, ServicePrincipalNames
     } catch {
         Write-Warning "Could not retrieve gMSAs. $($_.Exception.Message)"
     }
@@ -127,7 +127,7 @@ function Get-ADServiceAccounts {
     $userBasedSvc = @()
     try {
         $userBasedSvc = Get-ADUser -Filter 'Name -like "svc_*"' -Properties ServicePrincipalName |
-            Select Name, SamAccountName, ServicePrincipalName, Enabled
+            Select-Object Name, SamAccountName, ServicePrincipalName, Enabled
     } catch {
         Write-Warning "Could not retrieve user-based service accounts. $($_.Exception.Message)"
     }
@@ -295,7 +295,7 @@ function Get-GPOLogonLogoffScripts {
     return $scriptInfo
 }
 
-function Collect-DCEventLogs {
+function Get-DCEventLogs {
     <#
     .SYNOPSIS
         Collects specified event logs from all domain controllers in the domain.
