@@ -1,4 +1,4 @@
-# Blessing
+# Blessing AD – Our script is so ‘BAD,’ it’s good.
 
 ---
 ## Scripts 
