@@ -1,0 +1,244 @@
+<#
+.SYNOPSIS
+    Interactive AD Management Script
+
+.DESCRIPTION
+    This script provides an interactive, menu-driven interface to 
+    enable/disable/move/rename/reset passwords for user or computer accounts in AD.
+
+    Actions:
+      1) Enable
+      2) Disable
+      3) Move (to new OU)
+      4) Rename (change sAMAccountName/CN)
+      5) Reset Password (for users, optionally unlock)
+      6) Exit
+
+.NOTES
+    Author: Jacob Speckman
+    Date:   2025-02-14
+#>
+
+# Ensure the Active Directory module is loaded
+Import-Module ActiveDirectory -ErrorAction Stop
+
+function Get-ADObjectByIdentity {
+    param(
+        [Parameter(Mandatory=$true)]
+        [ValidateSet("User","Computer")]
+        [string]$ObjectType,
+
+        [Parameter(Mandatory=$true)]
+        [string]$Identity
+    )
+    try {
+        if ($ObjectType -eq "User") {
+            return Get-ADUser -Identity $Identity -ErrorAction Stop
+        }
+        elseif ($ObjectType -eq "Computer") {
+            return Get-ADComputer -Identity $Identity -ErrorAction Stop
+        }
+    }
+    catch {
+        Write-Error "Failed to locate $ObjectType with Identity: $Identity. Error: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Enable-ADObject {
+    param(
+        [Parameter(Mandatory=$true)]
+        $adObject,
+        [switch]$UnlockAccount
+    )
+    try {
+        Enable-ADAccount -Identity $adObject.DistinguishedName
+        Write-Host "Enabled successfully."
+        if ($UnlockAccount) {
+            if ($adObject.objectClass -eq "user") {
+                Unlock-ADAccount -Identity $adObject.DistinguishedName -ErrorAction SilentlyContinue
+                Write-Host "Account unlocked as well."
+            }
+        }
+    }
+    catch {
+        Write-Error "Failed to enable: $($_.Exception.Message)"
+    }
+}
+
+function Disable-ADObject {
+    param(
+        [Parameter(Mandatory=$true)]
+        $adObject
+    )
+    try {
+        Disable-ADAccount -Identity $adObject.DistinguishedName
+        Write-Host "Disabled successfully."
+    }
+    catch {
+        Write-Error "Failed to disable: $($_.Exception.Message)"
+    }
+}
+
+function Move-ADObjectInteractive {
+    param(
+        [Parameter(Mandatory=$true)]
+        $adObject,
+        [Parameter(Mandatory=$true)]
+        [string]$TargetOU
+    )
+    try {
+        Move-ADObject -Identity $adObject.DistinguishedName -TargetPath $TargetOU
+        Write-Host "Moved to $TargetOU successfully."
+    }
+    catch {
+        Write-Error "Failed to move: $($_.Exception.Message)"
+    }
+}
+
+function Rename-ADObjectInteractive {
+    param(
+        [Parameter(Mandatory=$true)]
+        $adObject,
+        [Parameter(Mandatory=$true)]
+        [string]$NewName
+    )
+    # For user or computer, we typically update SamAccountName and rename CN
+    try {
+        if ($adObject.objectClass -eq "user") {
+            Set-ADUser -Identity $adObject.DistinguishedName -SamAccountName $NewName -ErrorAction Stop
+        }
+        elseif ($adObject.objectClass -eq "computer") {
+            Set-ADComputer -Identity $adObject.DistinguishedName -SamAccountName $NewName -ErrorAction Stop
+        }
+        # Also rename the CN so the DN matches
+        # ** not setting not used ** $parentPath = ($adObject.distinguishedName -split "(?<=,),")[1..($adObject.DistinguishedName.split(",").Count - 1)] -join ","
+        Rename-ADObject -Identity $adObject.DistinguishedName -NewName ("CN=" + $NewName)
+
+        Write-Host "Renamed to $NewName successfully."
+    }
+    catch {
+        Write-Error "Failed to rename: $($_.Exception.Message)"
+    }
+}
+
+function Set-ADObjectPassword {
+    param(
+        [Parameter(Mandatory=$true)]
+        $adObject,
+        [Parameter(Mandatory=$true)]
+        [SecureString]$NewPassword,
+        [switch]$UnlockAccount
+    )
+    # Only truly relevant for user objects
+    try {
+        Set-ADAccountPassword -Identity $adObject.DistinguishedName -Reset -NewPassword (ConvertTo-SecureString $NewPassword -AsPlainText -Force)
+        
+        if ($adObject.objectClass -eq "user") {
+            # Force password change at next logon if desired
+            # (uncomment if you want that behavior always)
+            # Set-ADUser -Identity $adObject.DistinguishedName -ChangePasswordAtLogon $true
+
+            if ($UnlockAccount) {
+                Unlock-ADAccount -Identity $adObject.DistinguishedName -ErrorAction SilentlyContinue
+                Write-Host "Account unlocked."
+            }
+        }
+
+        Write-Host "Password reset successfully."
+    }
+    catch {
+        Write-Error "Failed to reset password: $($_.Exception.Message)"
+    }
+}
+function Show-MainMenu {
+    Clear-Host
+    Write-Host "==========================================="
+    Write-Host "   AD Management Interactive Script"
+    Write-Host "==========================================="
+    Write-Host "1) Enable Account"
+    Write-Host "2) Disable Account"
+    Write-Host "3) Move Account to another OU"
+    Write-Host "4) Rename Account"
+    Write-Host "5) Reset Password"
+    Write-Host "6) Exit"
+    Write-Host "==========================================="
+}
+
+while ($true) {
+    Show-MainMenu
+    $choice = Read-Host "Choose an option (1-6)"
+
+    if ($choice -eq '6') {
+        Write-Host "Exiting script."
+        break
+    }
+
+    # Ask if it's a user or computer
+    $objectTypeChoice = Read-Host "Is this a 'User' or 'Computer'? (Enter User/Computer)"
+    if ($objectTypeChoice -notin @('User','Computer')) {
+        Write-Warning "Invalid object type. Try again."
+        Continue
+    }
+
+    # Ask for identity
+    $identity = Read-Host "Enter the Identity (SamAccountName or DN)"
+
+    # Retrieve the AD object
+    $adObject = Get-ADObjectByIdentity -ObjectType $objectTypeChoice -Identity $identity
+    if (-not $adObject) {
+        # If we can't retrieve it, skip back to main menu
+        Read-Host "Press Enter to return to main menu."
+        Continue
+    }
+
+    switch ($choice) {
+        '1' {
+            # Enable
+            Write-Host "You chose: Enable"
+            $unlockQ = Read-Host "Do you want to unlock the account if locked? (y/n)"
+            $unlockSwitch = $false
+            if ($unlockQ -eq 'y') {
+                $unlockSwitch = $true
+            }
+            Enable-ADObject -adObject $adObject -UnlockAccount:($unlockSwitch)
+        }
+        '2' {
+            # Disable
+            Write-Host "You chose: Disable"
+            Disable-ADObject -adObject $adObject
+        }
+        '3' {
+            # Move
+            Write-Host "You chose: Move"
+            $newOu = Read-Host "Enter target OU DN (e.g. OU=NewOU,DC=example,DC=local)"
+            Move-ADObjectInteractive -adObject $adObject -TargetOU $newOu
+        }
+        '4' {
+            # Rename
+            Write-Host "You chose: Rename"
+            $newName = Read-Host "Enter the new name (SamAccountName/CN). For computers, include trailing '$'"
+            Rename-ADObjectInteractive -adObject $adObject -NewName $newName
+        }
+        '5' {
+            # Reset Password
+            if ($objectTypeChoice -eq 'Computer') {
+                Write-Warning "Reset password for a computer is possible, but typically not common. Proceeding."
+            }
+            $newPassword = Read-Host "Enter the new password" -AsSecureString
+            # Convert secure to plain text here for demonstration; in real usage consider a safer approach
+            $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($newPassword))
+            $unlockQ = Read-Host "Do you want to unlock if locked? (y/n)"
+            $unlockSwitch = $false
+            if ($unlockQ -eq 'y') {
+                $unlockSwitch = $true
+            }
+            ResetPassword-ADObject -adObject $adObject -NewPassword $plainPassword -UnlockAccount:($unlockSwitch)
+        }
+        default {
+            Write-Warning "Invalid menu choice."
+        }
+    }
+
+    Read-Host "`nOperation complete. Press Enter to continue."
+} 
