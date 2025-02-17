@@ -285,3 +285,172 @@ If you have any questions or issues:
 - Check your **PowerShell** version, **ActiveDirectory** module installation, and **user permissions**.  
 - Contact your **AD administrators** or open an **issue** in your internal repository if applicable.  
 
+# README: Set-ADObjectPassword
+
+## Overview
+
+**Set-ADObjectPassword** is a PowerShell function that **securely resets** the password of an **AD user** or **computer** object. It supports **SecureString** and **PSCredential** inputs, ensuring passwords are not exposed in plain text.
+
+Key features:
+
+1. **Multiple Parameter Sets**:  
+   - **`-SecurePassword`** (SecureString)  
+   - **`-Credential`** (PSCredential)  
+2. **Unlock** Option:  
+   - If it’s a user account, you can **unlock** it automatically after resetting.  
+3. **Forced Reset**:  
+   - Uses `-Reset` in `Set-ADAccountPassword`, which forcibly changes the password.
+
+---
+
+## Function Definition
+
+```powershell
+function Set-ADObjectPassword {
+    <#
+    .SYNOPSIS
+        Resets or sets a password on a User or Computer in AD, using either a SecureString or a PSCredential.
+    .DESCRIPTION
+        Accepts two parameter sets:
+         - SecureString (via -SecurePassword)
+         - PSCredential (via -Credential)
+        The function forces a password reset with Set-ADAccountPassword -Reset.
+        If -UnlockAccount is specified and it's a user object, the account is unlocked.
+
+    .PARAMETER adObject
+        The AD object (user or computer) from Get-ADUser or Get-ADComputer.
+
+    .PARAMETER SecurePassword
+        A SecureString representing the new password (must meet domain complexity).
+
+    .PARAMETER Credential
+        A PSCredential object (e.g., from Get-Credential). Only the .Password (SecureString) is used.
+
+    .PARAMETER UnlockAccount
+        If set and adObject is a user, unlocks the account.
+
+    .EXAMPLE
+        $user = Get-ADUser -Identity 'jsmith'
+        $pw = ConvertTo-SecureString "MyN3wP@ssword" -AsPlainText -Force
+        Set-ADObjectPassword -adObject $user -SecurePassword $pw -UnlockAccount
+
+    .EXAMPLE
+        $user = Get-ADUser -Identity 'jsmith'
+        $cred = Get-Credential
+        Set-ADObjectPassword -adObject $user -Credential $cred
+
+    .NOTES
+        Author: Your Name
+        Date:   2025-02-14
+    #>
+
+    [CmdletBinding(DefaultParameterSetName='SecureString')]
+    param(
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        $adObject,
+
+        [Parameter(Mandatory=$true, ParameterSetName='SecureString')]
+        [System.Security.SecureString]$SecurePassword,
+
+        [Parameter(Mandatory=$true, ParameterSetName='Credential')]
+        [System.Management.Automation.PSCredential]$Credential,
+
+        [switch]$UnlockAccount
+    )
+
+    process {
+        try {
+            # Determine which param set is used
+            if ($PSCmdlet.ParameterSetName -eq 'Credential') {
+                $securePw = $Credential.Password
+            }
+            else {
+                $securePw = $SecurePassword
+            }
+
+            Set-ADAccountPassword -Identity $adObject.DistinguishedName -Reset -NewPassword $securePw
+
+            if ($adObject.objectClass -eq "user" -and $UnlockAccount) {
+                Unlock-ADAccount -Identity $adObject.DistinguishedName -ErrorAction SilentlyContinue
+                Write-Host "User account unlocked."
+            }
+
+            Write-Host "Password set successfully for $($adObject.SamAccountName)."
+        }
+        catch {
+            Write-Error "Failed to set password on $($adObject.SamAccountName): $($_.Exception.Message)"
+        }
+    }
+}
+```
+
+---
+
+## Usage
+
+1. **SecureString Input**
+
+   ```powershell
+   # Obtain a user object
+   $user = Get-ADUser -Identity "jsmith"
+
+   # Convert a plain-text password to SecureString
+   $pw = ConvertTo-SecureString "MyN3wP@ssword" -AsPlainText -Force
+
+   # Reset & unlock
+   Set-ADObjectPassword -adObject $user -SecurePassword $pw -UnlockAccount
+   ```
+
+   - **Note**: `-Force` is required when converting a plain text string to a `SecureString`.
+   - **UnlockAccount** is optional; only applies to **users**.
+
+2. **Credential Input**
+
+   ```powershell
+   $user = Get-ADUser -Identity "jsmith"
+   $cred = Get-Credential
+   # The username part is unused; we only extract $cred.Password for the reset
+   Set-ADObjectPassword -adObject $user -Credential $cred
+   ```
+
+3. **Computer Account**
+
+   ```powershell
+   $comp = Get-ADComputer -Identity "Computer1$"
+   $pw = ConvertTo-SecureString "CompN3wP@ss" -AsPlainText -Force
+   Set-ADObjectPassword -adObject $comp -SecurePassword $pw
+   ```
+   - Computers typically don’t need unlocking, so `-UnlockAccount` doesn’t apply.
+
+---
+
+## Notes & Best Practices
+
+- **Parameter Sets**  
+  - You must supply **only one** of `-SecurePassword` or `-Credential`. If you provide both, PowerShell prompts you for which set to use.
+- **Plain Text**  
+  - Avoid storing passwords in scripts. Use **SecureString** or **PSCredential** to keep passwords secure in memory.
+- **Unlock Logic**  
+  - `-UnlockAccount` is only relevant if `objectClass -eq "user"`. For computers, it’s ignored.
+- **Change Password at Next Logon**  
+  - If desired, uncomment or add:  
+    ```powershell
+    Set-ADUser -Identity $adObject.DistinguishedName -ChangePasswordAtLogon $true
+    ```
+  - This forces the user to change the password on next sign-in.
+- **Permissions**  
+  - The caller must have **reset password** and **unlock** rights in AD for the target object (often Domain Admin or delegated privileges).
+
+---
+
+## Troubleshooting
+
+- **Access Denied**:  
+  - Ensure you run PowerShell with an account that can modify passwords for the specified AD object.  
+- **Complexity Errors**:  
+  - “The password does not meet the password policy requirements” indicates the password is too simple or reuses part of the old password.
+- **Parameter Binding**:  
+  - If you get errors about **invalid** or **missing** parameters, check that you’re only using **one** of `-SecurePassword` or `-Credential`, not both.
+
+---
+
