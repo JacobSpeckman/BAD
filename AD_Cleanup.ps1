@@ -34,7 +34,7 @@ Param(
     Folder path to store CSV logs of stale accounts. Defaults to "C:\AD_Cleanup_Logs".
 
 .NOTES
-    Author: Your Name
+    Author: Jacob Speckman
     Date:   2025-02-14
 #>
 
@@ -71,9 +71,9 @@ $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $staleUserCsv = Join-Path $LogPath "StaleUsers_$timestamp.csv"
 $staleCompCsv = Join-Path $LogPath "StaleComputers_$timestamp.csv"
 
-$staleUsers | Select Name, SamAccountName, Enabled, LastLogonDate, DistinguishedName |
+$staleUsers | Select-Object Name, SamAccountName, Enabled, LastLogonDate, DistinguishedName |
     Export-Csv -Path $staleUserCsv -NoTypeInformation
-$staleComputers | Select Name, SamAccountName, Enabled, LastLogonDate, DistinguishedName |
+$staleComputers | Select-Object Name, SamAccountName, Enabled, LastLogonDate, DistinguishedName |
     Export-Csv -Path $staleCompCsv -NoTypeInformation
 
 Write-Host "Stale user accounts exported to: $staleUserCsv"

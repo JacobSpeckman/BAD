@@ -76,7 +76,7 @@ $staleInfo.InactiveComputers | Export-Csv (Join-Path $ReportPath "StaleComputers
 Write-Host "[9] Collecting domain password policy..."
 $domainDN  = (Get-ADDomain).DistinguishedName
 $pwdPolicy = Get-PasswordPolicy -DomainDN $domainDN
-$pwdPolicy | Select * | Export-Csv (Join-Path $ReportPath "DomainPasswordPolicy.csv") -NoTypeInformation
+$pwdPolicy | Select-Object * | Export-Csv (Join-Path $ReportPath "DomainPasswordPolicy.csv") -NoTypeInformation
 
 Write-Host "[10] Collecting Kerberos settings..."
 $kerbSettings = Get-KerbPolicy
