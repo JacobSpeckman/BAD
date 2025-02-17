@@ -1,5 +1,3 @@
-Thanks for sharing the **README.md** from the **BAD (Blessing AD) repository**! Now that I have a full understanding of the tool, I can provide **a step-by-step guide for setting up a testing environment** to run and validate these PowerShell scripts.
-
 ---
 
 ## **Step-by-Step Guide: Setting Up an AD Testing Environment for BAD**
